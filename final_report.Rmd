@@ -1,0 +1,627 @@
+---
+title: "Depression in Dane County Highschoolers"
+author: "Robert George, Varsha Bhandari, and Maya Blitz"
+output: html_document
+---
+
+## Introduction
+
+"Suicide is the second leading cause of death in young people aged 15–24 years" (The American College of Obstetricians and Gynecologists, 2017).
+
+Many teens around the world struggle with mental illnesses and the stigmas associated with them. We, as data scientists, have all been personally affected by this issue, and seek to dive deeper into mental illness in teens and trends in not seeking treatment for such illnesses.
+
+Using self-reported data from 9th-12th graders in Dane County, Wisconsin, we hope to build a model that uses a variety of childhood factors, mainly dealing with exercise, neighborhood environment, and other factors of interest, to predict whether or not a highschooler in Dane county suffers from clinical depression. We will also consider the influence of demographics on survey response about their experience with long-term depression. The response variable our model will predict is a binary variable, where a response of 0 represents no self-reported long-term depression, and a response of 1 represents self-reported depression. Because there are many missing values in this response variable and throughout the data, we will also explore the correlation between demographics and whether or not each respondent answered the depression question. Hopefully we will be able to uncover a pattern between demographics and whether or not respondents answer the question, trends in clusters of our respondent data, and what factors are most indicative of long-term depression in teens.
+
+
+## Data
+
+```{r setup, include=FALSE}
+#knitr
+knitr::opts_chunk$set(echo = TRUE)
+#libraries
+library(tidyverse)
+library(haven)
+library(readxl)
+library(dplyr)
+library(purrr)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+library(cluster)
+library(Rtsne)
+```
+
+```{r, include=FALSE}
+setwd("~/stat340/stat340")
+dcya18_9_12 <- read_sav("DCYA 2018 9th_12th Share_2.sav")
+#codebook <- read_excel("../data/Codebook_share.xlsx")
+```
+
+```{r, include=FALSE}
+# Rob's data cleaning, depression recode
+hundred_up = function(df){
+  dep_recode = function(x){
+    return(replace_na(x, "No Info"))
+  }
+subset = df%>%
+  mutate(DepressionRecode = dep_recode(DepressionRecode))
+return(subset)
+}
+```
+
+```{r, include=FALSE}
+cleaned_data = hundred_up(dcya18_9_12)
+```
+
+```{r, include=FALSE}
+# Rob's cleanup, revamped and extended
+cleaned_data = cleaned_data %>%
+  mutate(AdultsIRelyOn = case_when(
+    is.na(AdultsIRelyOn) ~ 'No Info',
+    AdultsIRelyOn == 1 ~ 'No other adults available',
+    AdultsIRelyOn == 2 ~ 'At least one other adult',
+    AdultsIRelyOn == 3 ~ 'At least two',
+    AdultsIRelyOn == 4 ~ 'At least three',
+    AdultsIRelyOn == 5 ~ 'Five or more adults'
+  )) %>%
+  mutate(AskNeighborsForHelp = case_when(
+    is.na(AskNeighborsForHelp) ~ 'No Info',
+    AskNeighborsForHelp == 1 ~ 'Strongly agree',
+    AskNeighborsForHelp == 2 ~ 'Agree',
+    AskNeighborsForHelp == 3 ~ 'Disagree',
+    AskNeighborsForHelp == 4 ~ 'Strongly disagree'
+  )) %>%
+  mutate(WouldMissNeighborhood = case_when(
+    is.na(WouldMissNeighborhood) ~ 'No Info',
+    WouldMissNeighborhood == 1 ~ 'Strongly agree',
+    WouldMissNeighborhood == 2 ~ 'Agree',
+    WouldMissNeighborhood == 3 ~ 'Disagree',
+    WouldMissNeighborhood == 4 ~ 'Strongly disagree'
+  )) %>%
+  mutate(SafeInNeighborhood = case_when(
+    is.na(SafeInNeighborhood) ~ 'No Info',
+    SafeInNeighborhood == 1 ~ 'Strongly agree',
+    SafeInNeighborhood == 2 ~ 'Agree',
+    SafeInNeighborhood == 3 ~ 'Disagree',
+    SafeInNeighborhood == 4 ~ 'Strongly disagree'
+  )) %>%
+  mutate(NeighborsFriendly = case_when(
+    is.na(NeighborsFriendly) ~ 'No Info',
+    NeighborsFriendly == 1 ~ 'Strongly agree',
+    NeighborsFriendly == 2 ~ 'Agree',
+    NeighborsFriendly == 3 ~ 'Disagree',
+    NeighborsFriendly == 4 ~ 'Strongly disagree'
+  )) %>%
+  mutate(CountOnPolice = case_when(
+    is.na(CountOnPolice) ~ 'No Info',
+    CountOnPolice == 1 ~ 'Strongly agree',
+    CountOnPolice == 2 ~ 'Agree',
+    CountOnPolice == 3 ~ 'Disagree',
+    CountOnPolice == 4 ~ 'Strongly disagree'
+  )) %>%
+  mutate(HelpMyNeighbors = case_when(
+    is.na(HelpMyNeighbors) ~ 'No Info',
+    HelpMyNeighbors == 1 ~ 'Strongly agree',
+    HelpMyNeighbors == 2 ~ 'Agree',
+    HelpMyNeighbors == 3 ~ 'Disagree',
+    HelpMyNeighbors == 4 ~ 'Strongly disagree'
+  ))
+```
+
+```{r, include=FALSE}
+# Varsha's data clean-up, 1-15
+# Converted na values to "No Info' and transformed numerical values data into categorical data. Also renamed variables to make it more descriptive.
+#copy_1_15 <- dcya18_9_12
+#copy_1_15 <- copy_1_15 %>%
+#  select(RespondentID:SuppoprtFam) 
+#copy_1_15[is.na(copy_1_15)] <- 0
+cleaned_data = cleaned_data %>%
+  mutate(Race = case_when(
+    is.na(Race) ~ "No Info",
+    Race==1 ~ "Native American/American Indian or Alaskan Native",
+    Race==2 ~ "Asian (not Hmong)",
+    Race==3 ~ "Black or African American (not Hispanic)",
+    Race==4 ~ "Hispanic or Latino",
+    Race==5 ~ "Hmong",
+    Race==6 ~ "Middle Eastern or North African",
+    Race==7 ~ "Native Hawaiian or Pacific Islander",
+    Race==8 ~ "White (not Hispanic)",
+    Race==9 ~ "Multi-racial (more than one race)",
+  )) %>%
+  mutate(GenderID = case_when(
+    is.na(GenderID) ~ "No Info",
+    GenderID==1 ~ "Male",
+    GenderID==2 ~ "Female",
+    GenderID==3 ~ "Non-binary",
+    GenderID==4 ~ "Gender Fluid",
+    GenderID==5 ~ "Other",
+  )) %>%
+  mutate(LivingSituation=case_when(
+    is.na(LivingSituation) ~ "No Info",
+    LivingSituation==1 ~ "I live with my parent(s)",
+    LivingSituation==2 ~ "I live with relatives (not my parents)",
+    LivingSituation==3 ~ "I live with friends",
+    LivingSituation==4 ~ "I live in a group home or foster home",
+    LivingSituation==5 ~ "I live alone",
+    LivingSituation==6 ~ "Other",
+  ))%>%
+  mutate(RunAway=case_when(
+    is.na(RunAway)~"No Info",
+    RunAway==1~"Never",
+    RunAway==2~"Yes, in the last 12 months",
+    RunAway==3~"Yes, but not in the last 12 months",
+  ))%>%
+  mutate(Homeless=case_when(
+    is.na(Homeless)~"No Info",
+    Homeless==1~"Never",
+    Homeless==2~"Yes, in the last 12 months",
+    Homeless==3~"Yes, but not in the last 12 months",
+  ))%>%
+  mutate(ChangedSchools=case_when(
+    ChangedSchools==1 ~ "0 times",
+    ChangedSchools==2 ~ "1 time",
+    ChangedSchools==3 ~ "2 times",
+    ChangedSchools==4 ~ "3 or more times",
+    is.na(ChangedSchools) ~ "No Info",
+  ))
+  
+```
+
+
+```{r, include=FALSE}
+# Arden's data cleanup, 16-32
+# PhysicallyActive, Exercise, Sleep, FamilyMeals, & Breakfast are originally coded 0 days = 1, 1 day = 2, ...
+cleaned_data <- cleaned_data %>%
+  mutate(PhysicallyActive = PhysicallyActive - 1,
+         Exercise = Exercise - 1,
+         Sleep = Sleep - 1,
+         FamilyMeals = FamilyMeals - 1)
+# Some variables ask how many times do you do XX in a week? but the possible responses are categorical
+# ex: "0 times a week" gets coded as 1, "1-3 times a week" = 2, "4-7 times a week" = 3
+# turn these coded numerical responses to categorical strings
+# also, create dummies that signify any nonzero level of participation
+# code_activities = function(df, to_mutate) {
+#   df <- df %>%
+#     mutate(to_mutate = case_when(
+#       to_mutate == 1 ~ "Never",
+#       to_mutate == 2 ~ "Less than 1 day",
+#       to_mutate == 3 ~ "1-2 days",
+#       to_mutate == 4 ~ "3-4 days",
+#       to_mutate == 5 ~ "5+ days"
+#     ))
+#   return(df)
+# }
+cleaned_data <- cleaned_data %>%
+  mutate(PhysicallyActive = case_when(
+    is.na(PhysicallyActive) ~ 'No Info',
+    PhysicallyActive == 0 ~ '0 days',
+    PhysicallyActive == 1 ~ '1 day',
+    PhysicallyActive == 2 ~ '2 days',
+    PhysicallyActive == 3 ~ '3 days',
+    PhysicallyActive == 4 ~ '4 days',
+    PhysicallyActive == 5 ~ '5 days',
+    PhysicallyActive == 6 ~ '6 days',
+    PhysicallyActive == 7 ~ '7 days'
+  )) %>%
+  mutate(Sleep = case_when(
+    is.na(Sleep) ~ 'No Info',
+    Sleep == 0 ~ '0 days',
+    Sleep == 1 ~ '1 day',
+    Sleep == 2 ~ '2 days',
+    Sleep == 3 ~ '3 days',
+    Sleep == 4 ~ '4 days',
+    Sleep == 5 ~ '5 days',
+    Sleep == 6 ~ '6 days',
+    Sleep == 7 ~ '7 days'
+  )) %>%
+  mutate(FamilyMeals = case_when(
+    is.na(FamilyMeals) ~ 'No Info',
+    FamilyMeals == 0 ~ '0 days',
+    FamilyMeals == 1 ~ '1 day',
+    FamilyMeals == 2 ~ '2 days',
+    FamilyMeals == 3 ~ '3 days',
+    FamilyMeals == 4 ~ '4 days',
+    FamilyMeals == 5 ~ '5 days',
+    FamilyMeals == 6 ~ '6 days',
+    FamilyMeals == 7 ~ '7 days'
+  )) %>%
+  mutate(
+    NoLimits = case_when(
+      is.na(NoLimits) ~ 'No Info',
+      NoLimits != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    NoTime = case_when(
+      is.na(NoTime) ~ 'No Info',
+      NoTime != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    DontLike = case_when(
+      is.na(DontLike) ~ 'No Info',
+      DontLike != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    HealthProbs = case_when(
+      is.na(HealthProbs) ~ 'No Info',
+      HealthProbs != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    NoSkills = case_when(
+      is.na(NoSkills) ~ 'No Info',
+      NoSkills != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    NoProgram = case_when(
+      is.na(NoProgram) ~ 'No Info',
+      NoProgram != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    NoSignUp = case_when(
+      is.na(NoSignUp) ~ 'No Info',
+      NoSignUp != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    CostsTooMuch = case_when(
+      is.na(CostsTooMuch) ~ 'No Info',
+      CostsTooMuch != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    NoTransport = case_when(
+      is.na(NoTransport) ~ 'No Info',
+      NoTransport != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    ),
+    NoExercise_Other = case_when(
+      is.na(Other) ~ 'No Info',
+      Other != 0 ~ 'Agree',
+      TRUE ~ 'Disagree'
+    )
+  )
+# Combine height variables into a single inches variable, & create BMI variable
+cleaned_data <- cleaned_data %>%
+  mutate(HeightTotalInch = HeightFeet*12 + HeightInch,
+         BMI = (703*Weight)/(HeightTotalInch^2))
+```
+
+```{r, include=FALSE}
+# extra cleaning
+cleaned_data = cleaned_data %>%
+  mutate(MentalHealthServices = case_when(
+    is.na(MentalHealthServices) ~ 'No Info',
+    MentalHealthServices == 1 ~ 'No',
+    MentalHealthServices == 2 ~ 'Yes, outside of school',
+    MentalHealthServices == 3 ~ 'Yes, in school',
+    MentalHealthServices == 4 ~ "Yes, in and outside of school"
+  )) %>%
+  mutate(Depression = case_when(
+    is.na(Depression) ~ 'No Info',
+    Depression == 1 ~ 'Yes',
+    Depression == 2 ~ 'No'
+  )) %>%
+  mutate(Depression2 = case_when(
+    is.na(Depression2) ~ 'No Info',
+    Depression2 != 0 ~ 'Yes',
+    TRUE ~ 'No'
+  )) %>%
+  mutate(CareINeed = case_when(
+    is.na(CareINeed) ~ 'No Info',
+    CareINeed == 1 ~ 'Almost Never',
+    CareINeed == 2 ~ 'Not Often',
+    CareINeed == 3 ~ 'Sometimes',
+    CareINeed == 4 ~ 'Often',
+    CareINeed == 5 ~ 'Almost Always'
+  )) %>%
+  mutate(OKtoGetMentalHealthCare = case_when(
+    is.na(OKtoGetMentalHealthCare) ~ 'No Info',
+    OKtoGetMentalHealthCare == 1 ~ 'Strongly agree',
+    OKtoGetMentalHealthCare == 2 ~ 'Agree',
+    OKtoGetMentalHealthCare == 3 ~ 'Disagree',
+    OKtoGetMentalHealthCare == 4 ~ 'Strongly Disagree'
+  )) %>%
+  mutate(ParentMentalHealth = case_when(
+    is.na(ParentMentalHealth) ~ 'No Info',
+    ParentMentalHealth == 1 ~ 'Yes',
+    ParentMentalHealth == 2 ~ 'No',
+    ParentMentalHealth == 3 ~ 'Don\'t know'
+  )) %>%
+  mutate(DoAboutWeight = case_when(
+    is.na(DoAboutWeight) ~ 'No Info',
+    DoAboutWeight == 1 ~ 'Nothing',
+    DoAboutWeight == 2 ~ 'Lose weight',
+    DoAboutWeight == 3 ~ 'Gain weight',
+    DoAboutWeight == 4 ~ 'Stay the same weight'
+  ))
+```
+
+```{r, include=FALSE}
+#select only possibly wanted variables/columns from the cleaned data
+#I switched DepressionRecode to the end to make it easier to find -Robert
+cleaned_data = cleaned_data %>%
+  dplyr::select(RespondentID, Race, GenderID, LivingSituation, RunAway, Homeless, ChangedSchools, PhysicallyActive, NoLimits, NoTime, DontLike, HealthProbs, NoSkills, NoProgram, NoSignUp, CostsTooMuch, NoTransport, NoExercise_Other, Sleep, DoAboutWeight, FamilyMeals, ParentMentalHealth, OKtoGetMentalHealthCare, CareINeed, Depression, Depression2, AskNeighborsForHelp, WouldMissNeighborhood, SafeInNeighborhood, NeighborsFriendly, CountOnPolice, HelpMyNeighbors, AdultsIRelyOn, DepressionRecode)
+```
+
+```{r, include=FALSE}
+#recode response for depressionRecode (recode-recursion lol) as binary variable 1=response, 0=no response
+cleaned_data = cleaned_data%>%
+  mutate(response_binary = case_when(DepressionRecode == "No Info"~0,
+                                     TRUE ~ 1))
+```
+
+Our data is from the 2018 Dane County Youth Assessment (https://danecountyhumanservices.org/yth/yth_asmt_2018.aspx).  This data measures a variety of self-reported demographics of Dane County children from 9th through 12th grade in 2018.  These demographics include age, race, and sexual orientation, as well as things like participation in after school programs, family finances, and mental health.
+
+Each row contains 280 columns (it's quite an exhaustive survey), where each row is a student and each column holds the values of their responses to a variety of questions.
+
+We narrowed down the columns to questions relating to demographics (race and gender identification), neighborhood environment (living situation, parent and family relations, and neighborhood factors), physical health (BMI and exercise), and some confounding factors (depression indicators and how they deal with self-care). Most of the questions have a corresponding number as a response, where the number matches up with a multiple-choice response on the survey. We often cleaned this data by replacing the numbered responses in the data with their corresponding response from the survey. Because of this, most of the variables are categorical and not numerical.
+
+We also replaced the numerous missing values in the data with the response "No Info" instead. There could be many reasons someone doesn't answer a survey question, and the inclusion of these missing responses is very useful in our understanding of why someone might choose not to respond to our response question. Additionally, since every single row in our data had at least one missing value, we chose to leave these "No Info"s in for all our predictor variables, removing them only for our response variable. We, however want to note that naturally, a response of "No Info" to one survey question could likely be related to a response of "No Info" to another question.
+
+**We narrowed down the data to roughly 35 predictors:**
+
+RespondentID: respondent's unique ID
+
+Race: respondent's race
+
+GenderID: respondent's gender ID
+
+LivingSituation: where do they live (with parents, relatives, foster home, etc)
+
+RunAway: have they ever run away from home
+
+Homeless: have they ever been homeless
+
+ChangedSchools: have they ever changed schools
+
+PhysicallyActive: how many days of the week they are physically active for 60 min or more
+
+NoLimits: 1 if nothing limits them from exercising, 0 if something does
+
+NoTime: 1 if time limits them from exercising, 0 if not
+
+DontLike: 1 if not liking exercising keeps them from exercising, 0 if not
+
+HealthProbs: 1 if health problems keep them from exercising, 0 if not
+
+NoSkills: 1 if lack of skills keep them from exercising, 0 if not
+
+NoProgram: 1 if lack of exercise programs keeps them from exercising, 0 if not
+
+NoSignUp: 1 if not knowing how to sign up for exercise programs keeps them from exercising, 0 if not
+
+CostsTooMuch: 1 if cost keeps them from exercising, 0 if not
+
+NoTransport: 1 if lack of transportation keeps them from exercising, 0 if not
+
+NoExercise_Other: 1 if there is some other unlisted reason that keeps them from exercising, 0 if not
+
+Sleep: on average, how many school nights a week they are awake past past 11pm
+
+DoAboutWeight: what are they trying to do about their weight
+
+FamilyMeals: on an average week, how many days a week they eat meals with their family
+
+ParentMentalHealth: does their parent have a mental health problem that worries them
+
+OKtoGetMentalHealthCare: do they think most youth think it's okay to get professional help for a mental health issue
+
+CareINeed: do they give themselves the care they need when they are going through a tough time
+
+Depression: the past 12 months have they ever felt sad or hopeless every day for at least 2 weeks such that it keeps them from usual activities
+
+AskNeighborsForHelp: can they ask their neighbor for help
+
+WouldMissNeighborhood: if they had to move, they would miss their neighborhood
+
+SafeInNeighborhood: they feel safe in their neighborhood
+
+NeighborsFriendly: their neighbors are friendly to them
+
+CountOnPolice: they can count on the police if they need them
+
+HelpMyNeighbors: they help their neighbors
+
+AdultsIRelyOn: how many adults, other than their parents, they can rely on
+
+**Along with our response variable:**
+
+DepressionRecode: 1 for having suffered from long-term depression (at least 6 months), 0 for not
+
+
+## Methods
+
+First, we look at predicting responses and nonreponses in our response variable, with race and gender identification as predictors. It's important to note that we first do this with nonresponses to race and gender identification included, and as noted earlier, using nonresponses to predict a nonresponse isn't necessarily showing us something novel. We then seek to do the same but with the nonresponses in race and gender identification removed in order to see the differences in these two models and their accuracies.
+
+We continue by dropping missing values in our response variable. We then apply MCA coupled with KMeans clustering to get an idea of some of the groupings and their overarching commonalities between groups of children. We first compress our data to ten principle components, in order to make our large dataset more manageable. We continue by determining that the optimal number of medioids in our data is 2, so we apply a 2-Means clustering algorithm to identify two clusters in our data. These clusters can help us determine demographic trends in responses. Certainly, the responses could be grouped by gender, race, home life, exercise, or some of the other 35 predictors that we narrowed the data down to. These different groups may experience and deal with depression differently from each other, which is something we want to keep in mind as we continue our analysis.
+
+Next, we perform a train/test split on our dataset, and generate a decision tree on our training data to predict the probabilities of binary response of a 0 or 1 to our depression response variable based on a handful of our predictors. This tree shows some of the more important predictors of depression in our data, and how the responses to predictors correlate to our response variable. We run our testing data through our new algorithm, and generate a confusion matrix in order to assess the generalizability and accuracy of our model.
+
+Finally, we can also see some of the most important factors in predicting our response variable with a variance importance graph, using a random forest. This graph reflects what variables are chosen most often for branch splits in the decision trees created by our random forest, and all of the variables in our original classification tree are present. This further shows which factors have the most weight in predicting our response variable.
+
+
+## Results
+
+**Predicting Non-Responses by Demographics**
+
+```{r, include=FALSE}
+#Generate a train/test split
+smp_size <- floor(0.75 * nrow(cleaned_data))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(cleaned_data)), size = smp_size)
+train <- cleaned_data[train_ind, ]
+test <- cleaned_data[-train_ind, ]
+#Create a logistic regression model to determine the most important responses in Race and GenderID on response -- we can definitely mess with this to make it more meaningful
+attach(cleaned_data)
+fp_response.glm = glm(response_binary ~ Race+GenderID, family = "binomial", subset = train_ind)
+
+fp_response.probs=predict(fp_response.glm, test, type="response")
+glm.pred=rep(0,4073)
+glm.pred[fp_response.probs >.5]=1
+```
+
+*Table 1*
+```{r, echo = FALSE}
+summary(fp_response.glm)
+```
+
+*Table 2*
+```{r, echo = FALSE}
+#Confusion matrix
+table(glm.pred, test$response_binary)
+#Accuracy measure
+mean(glm.pred == test$response_binary)
+```
+
+```{r, include = FALSE}
+cleaned_data[] <- lapply(cleaned_data, factor)
+#Drop the nonresponses in predictors
+cleaned_data_dropNA = cleaned_data[!grepl("No Info", cleaned_data$Race),]
+cleaned_data_dropNA = cleaned_data[!grepl("No Info", cleaned_data$GenderID),]
+
+smp_size <- floor(0.75 * nrow(cleaned_data_dropNA))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(cleaned_data_dropNA)), size = smp_size)
+train <- cleaned_data_dropNA[train_ind, ]
+test <- cleaned_data_dropNA[-train_ind, ]
+
+#Create a logistic regression model to determine the most important responses in Race and GenderID on response excluding NO INFOs
+fp_response.glm = glm(response_binary ~ Race+GenderID, data = cleaned_data_dropNA, family = "binomial", subset = train_ind)
+
+fp_response.probs = predict(fp_response.glm, test, type="response")
+glm.pred=rep(0,3998)
+glm.pred[fp_response.probs > mean(test$response_binary==1)]=1
+
+```
+
+*Table 3*
+```{r, echo = FALSE}
+summary(fp_response.glm)
+```
+
+*Table 4*
+```{r, echo = FALSE}
+#Confusion matrix
+table(glm.pred, test$response_binary)
+#Accuracy measure
+mean(glm.pred == test$response_binary)
+```
+
+
+**Clustering**
+
+```{r, include = FALSE}
+#KNN with PCA. MUCH faster clustering.
+library(dplyr)
+#Drop NAs in DepressionRecode
+cleaned_data = cleaned_data[!grepl("No Info", cleaned_data$DepressionRecode),]
+features = cleaned_data%>%
+  dplyr::select(-"DepressionRecode",-"RespondentID",-"Depression2",-"response_binary",-"Depression")%>%
+  as.data.frame()
+
+library("FactoMineR")
+library("factoextra")
+#Run an MCA, which is a categorical version of PCA.
+fitord = MCA(features, ncp=10)
+fviz_eig(fitord)
+datafamd <- data.frame(fitord$ind$coord)
+```
+
+*Figure 1*
+```{r, fig.height=4, fig.width=13, echo=FALSE}
+#Now we find the optimal k number of clusters
+kmean_withinss <- function(k) {
+    cluster <- kmeans(datafamd, k)
+    return (cluster$tot.withinss)
+}
+
+# Set maximum cluster 
+max_k <-5 
+# Run algorithm over a range of k 
+wss <- sapply(2:max_k, kmean_withinss)
+# Create a data frame to plot the graph
+elbow <-data.frame(2:max_k, wss)
+ggplot(elbow, aes(x = X2.max_k, y = wss)) +
+    geom_point() +
+    geom_line() +
+    scale_x_continuous(breaks = seq(1, 20, by = 1))
+```
+
+*Figure 2*
+```{r, fig.height=4, fig.width=13, echo=FALSE}
+clusters = kmeans(datafamd,2)
+fviz_cluster(clusters, data = datafamd)
+```
+
+*Table 5*
+```{r, echo = FALSE}
+#Merge
+cluster = as.data.frame(clusters$cluster)$`clusters$cluster`
+clustered_data = cleaned_data%>%
+  mutate(cluster = cluster)
+  
+#Some summary stats grouped by cluster: feel free to mess around with these to make them more meaningful
+clustered_data%>%
+  group_by(cluster)%>%
+  summarize(prop_no_parent_problem = mean(ParentMentalHealth == "No"),
+            prop_care = mean(CareINeed == "Often" | CareINeed == "Almost Always"),
+            prop_no_depression = mean(DepressionRecode == 0))
+            
+#Should we do hypothesis testing on these clusters?
+```
+
+
+**Classification Tree**
+
+```{r, include = FALSE}
+#generate a tree for DepressionRecode dropping possible confounders
+fit <- rpart(DepressionRecode ~ CareINeed + ParentMentalHealth + RunAway + DoAboutWeight, data = train, method = 'class')
+```
+
+*Figure 3*
+
+```{r, fig.height=4, fig.width=13, echo=FALSE}
+rpart.plot(fit, extra = 106)
+```
+
+
+**Assessing Our Tree**
+
+*Table 6*
+```{r, include = FALSE}
+#predict DepressionRecode outcome with test data
+predictions = predict(fit, test, type = "class", max.overlaps = 100000000)
+
+#create confusion matrix
+library(caret)
+```
+
+```{r, echo = FALSE, cache = FALSE}
+caret::confusionMatrix(predictions,test$DepressionRecode)
+```
+
+
+**Random Forest**
+
+*Figure 4: Variable Importance Plot*
+```{r, echo=FALSE}
+fp.rf = randomForest(DepressionRecode~.-RespondentID-Depression2-response_binary-Depression, data = train, method = 'class')
+#Plotting variable importance, this is sort of like a PCA I think?
+varImpPlot(fp.rf)
+```
+
+
+## Interpretation
+  As we can see in Table 2, we can correctly predict a response 72% of the time with NO INFOs kept in the model for race and gender ID. Obviously, our model used No Info in the features as a predictor for not responding, in the sense that most people who did not respond to our mental health question also did not respond to the demographic questions. Thus, the weights for No Info responses are all significant. To avoid this, we drop the missing values in these predictors and test actual demographic effects on response probability. Our prediction accuracy rate is lower when we remove No Infos, but we are still able to achieve a fairly generalizable model with 65% accuracy (Table 4). It seems that non-white males have the greatest propensity for non-response to the question in the survey related to mental health from which we extracted our DepressionRecode variable. African American respondents had the largest negative weight at high significance, indicating that they were far less likely to respond.
+  
+  Next, we move along with our clustering. Figure 1 shows the sum of squares results for each value k. We see that we have 2 clusters in our dataset. Figure 2 is a visualization of our clustered and compressed data. We assign each data point its respective cluster, and see that there are some interesting differences in our variables, as shown in table 5.
+  
+  Next, we move on to supervised learning, now that we have explored our data sufficiently. We create a classification tree with the above predictors and response variable. Our results are visualized in Figure 3. We can see that the most influential feature variable in our data is CareINeed, and see that someone who answers that they do not give themselves the care they need when they are feeling sad have a 50% chance of reporting a depression diagnosis. Table 6 shows that our tree has 64% accuracy, and is able to predict a depression diagnosis fairly well given our data. 
+  
+  Figure 4 shows the relative importance of each of our variables in the forking process. CareINeed is the most frequently used variable for forking in the many trees that the random forest creates. This indicates the variable's importance in predicting depression in our dataset.
+
+
+## Conclusion
+  In conclusion, there are a variety of childhood factors that can help us predict whether or not a high schooler in Dane county suffers from clinical depression. Throughout the data shown in the results section, we can assess certain factors of our data that can correlate with depression. However, we want to assert that these variables are not necessarily causal. The mere fact that someone may exhibit responses that we use to predict depression does not mean that they have clinical depression. We are just seeing the correlation between childhood factors and depression. 
+  
+  In predicting non-responses by demographics, we see that there is a higher chance of correctly predicting whether or not a person has depression if information of race and gender were given, because we cannot predict depression if the response variable is missing. Cluster 2 reported a lower proportion of depression and a higher proportion of self-care than Cluster 1, which had higher rates of depression and lower rates of self-care. This result is consistent with our later supervised endeavors, which indicated that self-care is the most influential variable on depression. Figure 4 also shows that factors like self-care, eating meals with family, physical activity and sleep are important factors in determining whether or not a student is diagnosed with depression. Ultimately, we see that there is an obvious and significant correlation between depression in high-schoolers and general self-care. Physical activity, sleep, and self-care are all highly predictive of depression in our data. Interestingly, activities that promote family wellbeing like eating with your family also had a strong effect on depression.
+	
+  One of the main limitations with our project is the fact that were a lot of nonresponses in the data. This hindered our process of making a model and the accuracy of our model in predicting our response variable. The more data with responses, the better our accuracy of predicting our response variable would have been. Additionally, we could have explored more predictors in the Dane County Youth Assessment dataset, like the different school activities and predictors related to their school life to explore how different factors of school can affect a student’s mental health. Future research with this data might be concerned with further illuminating trends in nonresponse, to see how robust our ability to predict depression actually is with this data. It is in the opinion of the authors that the survey may not represent the true extent of depression in Dane County Highschoolers.
