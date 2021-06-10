@@ -1,2 +1,2 @@
 # Predicting-Depression
-My final project for a Statistics class at UW-Madison.
+My final project for a Statistics class at UW-Madison. The data is sourced from the Dane County Youth Assessment, a survey given to high schoolers in Dane County, Wisconsin. In this project, we write a formal report that contains different predictive and analytical measures of the data, including logistic regression, a categorical PCA, K-Means clustering, decision trees, and a random forest.
